@@ -1,0 +1,559 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>MIDI Text Score</title>
+<style>
+  :root { color-scheme: light; --ink:#202938; --muted:#5c687a; --line:#d7dfeb; --bg:#f4f7fb; --blue:#245cc5; --red:#b42318; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:28px 16px 48px; background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,"Segoe UI",sans-serif; }
+  main { max-width:900px; margin:0 auto; }
+  h1 { margin:0 0 8px; font-size:clamp(24px,4vw,32px); }
+  h2 { margin:0 0 14px; font-size:19px; }
+  p { line-height:1.6; }
+  .intro { color:var(--muted); margin-top:0; }
+  .panel { background:#fff; border:1px solid var(--line); border-radius:14px; padding:20px; margin:16px 0; box-shadow:0 2px 8px #24334d08; }
+  #drop { border:2px dashed #8c9bb0; border-radius:12px; padding:28px 14px; text-align:center; cursor:pointer; background:#fbfdff; }
+  #drop:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible { outline:3px solid #8bb7ff; outline-offset:2px; }
+  #drop.over { background:#e9f2ff; border-color:var(--blue); }
+  #drop strong { font-size:17px; }
+  button, select, input { font:inherit; padding:10px 12px; border:1px solid #aab6c7; border-radius:8px; background:#fff; color:inherit; }
+  button { cursor:pointer; }
+  button.primary { background:var(--blue); color:#fff; border-color:var(--blue); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .controls { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:18px; }
+  .field { display:flex; flex-direction:column; gap:6px; min-width:0; }
+  .field label { font-weight:650; }
+  .hint, .muted { color:var(--muted); font-size:13px; }
+  .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }
+  #filename { overflow-wrap:anywhere; }
+  #status { white-space:pre-wrap; line-height:1.6; }
+  #status.error { color:var(--red); }
+  #status.success { color:#147348; }
+  #result { margin:0; min-height:120px; padding:14px; border:1px solid var(--line); border-radius:9px; background:#f9fbfe; white-space:pre-wrap; overflow-wrap:anywhere; font:14px/1.85 ui-monospace,SFMono-Regular,Consolas,monospace; }
+  .privacy { display:flex; align-items:flex-start; gap:10px; background:#eef8f1; border:1px solid #c7e8d1; border-radius:10px; padding:12px; }
+  .privacy strong { display:block; }
+  .keygrid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:5px; margin-top:10px; }
+  .key { text-align:center; background:#f1f5fa; border:1px solid #dce4ee; border-radius:7px; padding:8px 2px; }
+  .key b { display:block; font-size:16px; }
+  .key small { color:var(--muted); font-size:11px; }
+  details { margin-top:12px; }
+  summary { cursor:pointer; font-weight:650; }
+  @media (max-width:620px) { body { padding:18px 10px 32px; } .panel { padding:15px; } .controls { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>MIDI Text Score</h1>
+  <p class="intro">MIDIを読み込み、3種類の表記から文字の楽譜を作成してTXTで保存します。</p>
+
+  <div class="privacy">
+    <div aria-hidden="true">🔒</div>
+    <div><strong>ブラウザ内で変換します</strong><span class="hint">このHTMLはMIDIファイルをアップロードせず、外部ライブラリや外部通信も使用しません。</span></div>
+  </div>
+
+  <section class="panel">
+    <h2>1. MIDIファイル</h2>
+    <div id="drop" tabindex="0" role="button" aria-label="MIDIファイルを選択、またはここにドロップ">
+      <strong>MIDIファイルをここにドロップ</strong>
+      <p>またはクリックしてファイルを選択</p>
+      <span class="muted">対応形式：.mid / .midi</span>
+      <input id="file" type="file" accept=".mid,.midi,audio/midi" hidden>
+    </div>
+    <p id="filename" class="muted">ファイル未選択</p>
+
+    <h2 style="margin-top:24px">2. 表示設定</h2>
+    <div class="controls">
+      <div class="field">
+        <label for="notation">音の表記形式</label>
+        <select id="notation">
+          <option value="ja">日本語：ド1、レ1、ミ1…</option>
+          <option value="en">英語：do1、re1、mi1…</option>
+          <option value="key">キーボード：Z、X、C…</option>
+        </select>
+        <span class="hint">対応音域はC3〜B5。黒鍵は使えません。</span>
+      </div>
+      <div class="field">
+        <label for="restUnit">「-」1個の長さ（休符単位）</label>
+        <select id="restUnit">
+          <option value="2">2分音符相当</option>
+          <option value="4">4分音符相当</option>
+          <option value="8">8分音符相当</option>
+          <option value="16" selected>16分音符相当</option>
+          <option value="32">32分音符相当</option>
+        </select>
+        <span class="hint">選択した長さを1枠として休符を「-」で表示します。</span>
+      </div>
+      <div class="field">
+        <label for="lineEvery">何小節ごとに改行するか</label>
+        <select id="lineEvery">
+          <option value="1">1小節ごと</option>
+          <option value="2">2小節ごと</option>
+          <option value="3">3小節ごと</option>
+          <option value="4" selected>4小節ごと</option>
+          <option value="5">5小節ごと</option>
+          <option value="6">6小節ごと</option>
+          <option value="7">7小節ごと</option>
+          <option value="8">8小節ごと</option>
+        </select>
+        <span class="hint">1〜8小節から選べます。</span>
+      </div>
+      <div class="field">
+        <label for="startBar">最初に改行する小節番号</label>
+        <input id="startBar" type="number" min="1" step="1" value="1" inputmode="numeric">
+        <span class="hint">例：間隔4、開始小節2なら2・6・10小節の前で改行します。</span>
+      </div>
+    </div>
+
+    <details>
+      <summary>キーボード表記のキー配列</summary>
+      <p class="hint">低いドから高いシまで、白鍵21音だけを割り当てます。黒鍵は割り当てません。</p>
+      <div class="keygrid" aria-label="低い音から高い音へのキー配列">
+        <div class="key"><b>Z</b><small>ド1</small></div><div class="key"><b>X</b><small>レ1</small></div>
+        <div class="key"><b>C</b><small>ミ1</small></div><div class="key"><b>V</b><small>ファ1</small></div>
+        <div class="key"><b>B</b><small>ソ1</small></div><div class="key"><b>N</b><small>ラ1</small></div>
+        <div class="key"><b>M</b><small>シ1</small></div>
+        <div class="key"><b>A</b><small>ド2</small></div><div class="key"><b>S</b><small>レ2</small></div>
+        <div class="key"><b>D</b><small>ミ2</small></div><div class="key"><b>F</b><small>ファ2</small></div>
+        <div class="key"><b>G</b><small>ソ2</small></div><div class="key"><b>H</b><small>ラ2</small></div>
+        <div class="key"><b>J</b><small>シ2</small></div>
+        <div class="key"><b>Q</b><small>ド3</small></div><div class="key"><b>W</b><small>レ3</small></div>
+        <div class="key"><b>E</b><small>ミ3</small></div><div class="key"><b>R</b><small>ファ3</small></div>
+        <div class="key"><b>T</b><small>ソ3</small></div><div class="key"><b>Y</b><small>ラ3</small></div>
+        <div class="key"><b>U</b><small>シ3</small></div>
+      </div>
+    </details>
+
+    <div class="actions">
+      <button id="convert" class="primary">テキストに変換</button>
+      <button id="download" disabled>TXTをダウンロード</button>
+    </div>
+    <p id="status" role="status" aria-live="polite"></p>
+  </section>
+
+  <section class="panel">
+    <h2>変換結果</h2>
+    <pre id="result">MIDIファイルを選択してください。</pre>
+  </section>
+
+  <p class="hint">注：音符の開始位置を選択した休符単位に合わせて文字化します。同時に始まる音は音高の低い順に [ド1ミ1] のように表示します。MIDIの特殊な拍子や複雑なタイミングでは、表現に近似が入る場合があります。</p>
+</main>
+
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+let selectedFile = null;
+let outputText = "";
+
+function showStatus(message, kind = "") {
+  $("status").textContent = message;
+  $("status").className = kind;
+}
+
+function setFile(file) {
+  if (!file) return;
+  if (!/\.(mid|midi)$/i.test(file.name)) {
+    selectedFile = null;
+    $("filename").textContent = "ファイル未選択";
+    $("download").disabled = true;
+    outputText = "";
+    showStatus("MIDIファイル（.mid または .midi）を選択してください。", "error");
+    return;
+  }
+  selectedFile = file;
+  $("filename").textContent = "選択中：" + file.name + "（" + Math.ceil(file.size / 1024) + " KB）";
+  $("result").textContent = "「テキストに変換」を押してください。";
+  $("download").disabled = true;
+  outputText = "";
+  showStatus("");
+}
+
+$("drop").addEventListener("click", () => $("file").click());
+$("drop").addEventListener("keydown", e => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    $("file").click();
+  }
+});
+$("file").addEventListener("change", e => setFile(e.target.files[0]));
+$("drop").addEventListener("dragover", e => {
+  e.preventDefault();
+  $("drop").classList.add("over");
+});
+$("drop").addEventListener("dragleave", () => $("drop").classList.remove("over"));
+$("drop").addEventListener("drop", e => {
+  e.preventDefault();
+  $("drop").classList.remove("over");
+  setFile(e.dataTransfer.files[0]);
+});
+
+function parseMIDI(buffer) {
+  const view = new DataView(buffer);
+  let p = 0;
+  function need(n, end = view.byteLength) {
+    if (p + n > end) throw new Error("MIDIデータが途中で終わっています。ファイルが壊れていないか確認してください。");
+  }
+  function u8(end) { need(1, end); return view.getUint8(p++); }
+  function u16(end) { need(2, end); const v = view.getUint16(p); p += 2; return v; }
+  function u32(end) { need(4, end); const v = view.getUint32(p); p += 4; return v; }
+  function fourCC(end) {
+    need(4, end);
+    let s = "";
+    for (let i = 0; i < 4; i++) s += String.fromCharCode(view.getUint8(p++));
+    return s;
+  }
+  function vlq(end) {
+    let value = 0;
+    for (let i = 0; i < 4; i++) {
+      const b = u8(end);
+      value = value * 128 + (b & 127);
+      if (!(b & 128)) return value;
+    }
+    throw new Error("MIDIの可変長データが不正です。");
+  }
+
+  if (fourCC() !== "MThd") throw new Error("標準MIDIファイルではありません。");
+  const headerLen = u32();
+  if (headerLen < 6) throw new Error("MIDIヘッダーが不正です。");
+  const headerEnd = p + headerLen;
+  need(headerLen);
+  const format = u16();
+  const trackCount = u16();
+  const division = u16();
+  p = headerEnd;
+
+  if (format === 2) throw new Error("MIDIタイプ2（独立した複数シーケンス）は対応していません。");
+  if (division & 0x8000) throw new Error("SMPTEタイム形式のMIDIには対応していません。");
+  const ppq = division;
+  if (!ppq) throw new Error("MIDIの時間分解能が不正です。");
+
+  const notes = [];
+  const timeSignatures = [{ tick: 0, numerator: 4, denominator: 4 }];
+  const active = new Map();
+  let maxTick = 0;
+
+  for (let tr = 0; tr < trackCount; tr++) {
+    if (fourCC() !== "MTrk") throw new Error("MIDIトラックが見つかりません。");
+    const len = u32();
+    const end = p + len;
+    if (end > view.byteLength) throw new Error("MIDIトラックの長さが不正です。");
+    let tick = 0;
+    let runningStatus = 0;
+
+    while (p < end) {
+      tick += vlq(end);
+      maxTick = Math.max(maxTick, tick);
+      let status = u8(end);
+      if (status < 0x80) {
+        if (!runningStatus) throw new Error("MIDIイベントの読み取りに失敗しました。");
+        p--;
+        status = runningStatus;
+      } else if (status < 0xF0) {
+        runningStatus = status;
+      }
+
+      if (status === 0xFF) {
+        const type = u8(end);
+        const length = vlq(end);
+        need(length, end);
+        if (type === 0x58 && length >= 2) {
+          const numerator = u8(end);
+          const power = u8(end);
+          if (power > 7) throw new Error("対応できない拍子情報があります。");
+          timeSignatures.push({ tick, numerator, denominator: 2 ** power });
+          p += length - 2;
+        } else {
+          p += length;
+        }
+        runningStatus = 0;
+        continue;
+      }
+
+      if (status === 0xF0 || status === 0xF7) {
+        const length = vlq(end);
+        need(length, end);
+        p += length;
+        runningStatus = 0;
+        continue;
+      }
+      if (status >= 0xF0) throw new Error("対応していないMIDIシステムイベントがあります。");
+
+      const kind = status & 0xF0;
+      const channel = status & 0x0F;
+      const a = u8(end);
+      const b = (kind === 0xC0 || kind === 0xD0) ? 0 : u8(end);
+
+      if (kind === 0x90 && b > 0) {
+        const key = `${tr}:${channel}:${a}`;
+        if (!active.has(key)) active.set(key, []);
+        active.get(key).push({ tick, pitch: a, track: tr, channel, velocity: b });
+      } else if (kind === 0x80 || (kind === 0x90 && b === 0)) {
+        const key = `${tr}:${channel}:${a}`;
+        const queue = active.get(key);
+        if (queue && queue.length) {
+          const start = queue.shift();
+          notes.push({ ...start, end: Math.max(tick, start.tick) });
+        }
+      }
+    }
+    p = end;
+  }
+
+  const hanging = [];
+  for (const queue of active.values()) if (queue.length) hanging.push(...queue);
+  if (hanging.length) {
+    // Some files omit note-off events. Treat the last such notes as ending at the file's last tick.
+    for (const n of hanging) notes.push({ ...n, end: Math.max(maxTick, n.tick) });
+  }
+  if (!notes.length) throw new Error("MIDIに音符が見つかりませんでした。");
+
+  timeSignatures.sort((a, b) => a.tick - b.tick);
+  const deduped = [];
+  for (const s of timeSignatures) {
+    if (deduped.length && deduped[deduped.length - 1].tick === s.tick) deduped[deduped.length - 1] = s;
+    else deduped.push(s);
+  }
+  return { ppq, notes, timeSignatures: deduped, maxTick };
+}
+
+const WHITE_PITCHES = [
+  48, 50, 52, 53, 55, 57, 59,
+  60, 62, 64, 65, 67, 69, 71,
+  72, 74, 76, 77, 79, 81, 83
+];
+const JP = ["ド", "レ", "ミ", "ファ", "ソ", "ラ", "シ"];
+const EN = ["do", "re", "mi", "fa", "so", "la", "si"];
+const KEYBOARD = ["Z", "X", "C", "V", "B", "N", "M", "A", "S", "D", "F", "G", "H", "J", "Q", "W", "E", "R", "T", "Y", "U"];
+const SHARP_NAMES = ["ド#", "レ#", "ファ#", "ソ#", "ラ#"];
+
+function pitchLabel(pitch, mode) {
+  if (pitch < 48 || pitch > 83) return { error: "対応音域外" };
+  const index = WHITE_PITCHES.indexOf(pitch);
+  if (index < 0) {
+    const pc = pitch % 12;
+    const octave = Math.floor(pitch / 12) - 2;
+    const sharpName = SHARP_NAMES[{1:0,3:1,6:2,8:3,10:4}[pc]];
+    return { error: "黒鍵の音", noteName: (sharpName || "黒鍵") + octave };
+  }
+  if (mode === "key") return { label: KEYBOARD[index] };
+  const names = mode === "en" ? EN : JP;
+  return { label: names[index % 7] + (Math.floor(index / 7) + 1) };
+}
+
+function makeBarMap(midi) {
+  const { ppq, timeSignatures, maxTick } = midi;
+  const changes = timeSignatures.map(s => ({
+    ...s,
+    ticksPerBar: ppq * 4 * s.numerator / s.denominator
+  }));
+  for (const c of changes) {
+    if (!Number.isInteger(c.ticksPerBar) || c.ticksPerBar <= 0) {
+      throw new Error(`拍子 ${c.numerator}/${c.denominator} の小節長を計算できません。`);
+    }
+  }
+
+  // A time-signature change starts a new bar at its event tick.
+  // The next signature's event tick is used as the start of its new segment.
+  const segments = [];
+  let barNumber = 1;
+  for (let i = 0; i < changes.length; i++) {
+    const s = changes[i];
+    const next = changes[i + 1];
+    const startTick = s.tick;
+    if (i > 0) {
+      const previous = segments[segments.length - 1];
+      const elapsed = startTick - previous.startTick;
+      barNumber = previous.startBar + Math.ceil(elapsed / previous.ticksPerBar);
+    }
+    segments.push({
+      startTick,
+      endTick: next ? next.tick : Infinity,
+      startBar: barNumber,
+      ticksPerBar: s.ticksPerBar,
+      numerator: s.numerator,
+      denominator: s.denominator
+    });
+  }
+  function locate(tick) {
+    let seg = segments[0];
+    for (const s of segments) {
+      if (s.startTick <= tick) seg = s;
+      else break;
+    }
+    const offset = Math.max(0, tick - seg.startTick);
+    const localBar = Math.floor(offset / seg.ticksPerBar);
+    return {
+      bar: seg.startBar + localBar,
+      barStart: seg.startTick + localBar * seg.ticksPerBar,
+      ticksPerBar: seg.ticksPerBar,
+      numerator: seg.numerator,
+      denominator: seg.denominator
+    };
+  }
+  const last = locate(maxTick);
+  const totalBars = Math.max(1, last.bar);
+  const bars = [];
+  for (let bar = 1; bar <= totalBars; bar++) {
+    // Find start tick of a numbered bar in the corresponding segment.
+    let chosen = segments[0];
+    for (const s of segments) {
+      if (s.startBar <= bar) chosen = s;
+      else break;
+    }
+    const startTick = chosen.startTick + (bar - chosen.startBar) * chosen.ticksPerBar;
+    bars.push({
+      number: bar,
+      startTick,
+      endTick: startTick + chosen.ticksPerBar,
+      ticksPerBar: chosen.ticksPerBar,
+      numerator: chosen.numerator,
+      denominator: chosen.denominator
+    });
+  }
+  return { bars, locate, totalBars };
+}
+
+function convertMIDI(midi, mode, restUnit, lineEvery, startBar) {
+  const barMap = makeBarMap(midi);
+  const { bars, locate } = barMap;
+  const errors = [];
+  const mappedNotes = [];
+
+  for (const note of midi.notes) {
+    const info = pitchLabel(note.pitch, mode);
+    const position = locate(note.tick);
+    if (info.error) {
+      errors.push({
+        bar: position.bar,
+        tick: note.tick,
+        pitch: note.pitch,
+        reason: info.error,
+        noteName: info.noteName || `MIDI note ${note.pitch}`
+      });
+    } else {
+      mappedNotes.push({ ...note, label: info.label, bar: position.bar });
+    }
+  }
+
+  if (errors.length) {
+    const unique = new Map();
+    for (const e of errors) unique.set(`${e.bar}:${e.pitch}:${e.reason}`, e);
+    const details = [...unique.values()]
+      .sort((a, b) => a.bar - b.bar || a.pitch - b.pitch)
+      .slice(0, 40)
+      .map(e => `小節 ${e.bar}：${e.noteName} — ${e.reason}`);
+    throw new Error(
+      "変換を中止しました。黒鍵または対応音域外の音が含まれています。\n" +
+      "黒鍵を別の音に置き換えることはしません。\n\n" +
+      details.join("\n") +
+      (unique.size > 40 ? "\nほかにも該当する音があります。" : "")
+    );
+  }
+
+  const unit = 4 * midi.ppq / restUnit;
+  if (!Number.isFinite(unit) || unit <= 0) throw new Error("休符の時間単位を計算できません。");
+  const notesByBar = new Map();
+  for (const n of mappedNotes) {
+    const barInfo = bars[n.bar - 1];
+    if (!barInfo) continue;
+    const raw = (n.tick - barInfo.startTick) / unit;
+    const slot = Math.max(0, Math.round(raw));
+    if (!notesByBar.has(n.bar)) notesByBar.set(n.bar, []);
+    notesByBar.get(n.bar).push({ ...n, slot });
+  }
+
+  const renderedBars = [];
+  for (const bar of bars) {
+    const slotsInBarRaw = bar.ticksPerBar / unit;
+    const slotsInBar = Math.max(1, Math.ceil(slotsInBarRaw - 1e-9));
+    const atSlot = Array.from({ length: slotsInBar }, () => []);
+    const notes = notesByBar.get(bar.number) || [];
+    for (const n of notes) {
+      if (n.slot < atSlot.length) atSlot[n.slot].push(n);
+    }
+
+    // 音名は鳴り始めたスロットだけに表示し、それ以外のスロットは
+    // 音がまだ鳴り続けていても「-」を表示する。音の終了時刻は出力判定に使わない。
+    let line = "";
+    for (let slot = 0; slot < slotsInBar; slot++) {
+      const starts = atSlot[slot];
+
+      if (starts.length) {
+        starts.sort((a, b) => a.pitch - b.pitch);
+        if (starts.length === 1) line += starts[0].label;
+        else line += "[" + starts.map(n => n.label).join("") + "]";
+      } else {
+        line += "-";
+      }
+    }
+    renderedBars.push({ number: bar.number, text: line + "｜" });
+  }
+
+  const groups = [];
+  let current = "";
+  for (const b of renderedBars) {
+    if (b.number >= startBar && (b.number - startBar) % lineEvery === 0) {
+      if (current) groups.push(current);
+      current = "";
+    }
+    current += b.text;
+  }
+  if (current) groups.push(current);
+  return groups.join("\n");
+}
+
+$("convert").addEventListener("click", async () => {
+  if (!selectedFile) {
+    showStatus("先にMIDIファイルを選択してください。", "error");
+    return;
+  }
+  const startBar = Number($("startBar").value);
+  const lineEvery = Number($("lineEvery").value);
+  const restUnit = Number($("restUnit").value);
+  if (!Number.isInteger(startBar) || startBar < 1) {
+    showStatus("改行を始める小節番号は1以上の整数にしてください。", "error");
+    return;
+  }
+  if (![1,2,3,4,5,6,7,8].includes(lineEvery)) {
+    showStatus("改行間隔は1〜8小節から選んでください。", "error");
+    return;
+  }
+  $("convert").disabled = true;
+  $("download").disabled = true;
+  showStatus("変換しています…");
+  try {
+    const buffer = await selectedFile.arrayBuffer();
+    const midi = parseMIDI(buffer);
+    const score = convertMIDI(midi, $("notation").value, restUnit, lineEvery, startBar);
+    outputText = `ファイル名: ${selectedFile.name}\n\n${score}`;
+    $("result").textContent = outputText;
+    $("download").disabled = false;
+    showStatus("変換が完了しました。MIDIデータはこのブラウザ内で処理されました。", "success");
+  } catch (err) {
+    outputText = "";
+    $("result").textContent = "";
+    showStatus(err && err.message ? err.message : "変換中に予期しないエラーが発生しました。", "error");
+  } finally {
+    $("convert").disabled = false;
+  }
+});
+
+$("download").addEventListener("click", () => {
+  if (!outputText || !selectedFile) return;
+  const blob = new Blob(["\uFEFF" + outputText], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = (selectedFile.name.replace(/\.(mid|midi)$/i, "") || "midi-score") + ".txt";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+</script>
+</body>
+</html>
